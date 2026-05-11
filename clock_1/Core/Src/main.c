@@ -27,7 +27,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <string.h>
+
 #include "timers.h"
+#include "WifiTask.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,7 +51,9 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+uint8_t rx_byte;          // 用于接收单个字节的缓存
+char rx_buffer[64];       // 用于拼接完整一帧数据的数组
+uint8_t rx_index = 0;     // 当前拼接到第几个字符了
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -98,7 +103,8 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  // 【关键】在 RTOS 启动前，开启第一次 USART1 接收中断
+  HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -170,6 +176,45 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+extern osMessageQueueId_t WifiQueueHandle;
+
+/**
+  * @brief  串口接收完成回调函数 (USART1)
+  */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+  if (huart->Instance == USART1) {
+    // 遇到换行符说明一帧结束
+    if (rx_byte == '\n') {
+      rx_buffer[rx_index] = '\0';
+      if (WifiQueueHandle != NULL) {
+        // 将字符串数据发送给 WifiTask 任务去解析
+        osMessageQueuePut(WifiQueueHandle, rx_buffer, 0, 0);
+      }
+      rx_index = 0;
+    }
+    else if (rx_byte != '\r') {
+      // 只要不是回车符，就存入缓冲区
+      if (rx_index < sizeof(rx_buffer) - 1) {
+        rx_buffer[rx_index++] = rx_byte;
+      }
+    }
+
+    // 再次开启中断接收
+    HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
+  }
+}
+
+/**
+  * @brief  串口错误处理 (解决串口卡死问题)
+  */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+  if (huart->Instance == USART1) {
+    __HAL_UART_CLEAR_OREFLAG(huart); // 清除溢出错误
+    HAL_UART_Receive_IT(&huart1, &rx_byte, 1); // 重新激活
+  }
+}
+
 
 extern osTimerId_t BuzzerTimerHandle;
 

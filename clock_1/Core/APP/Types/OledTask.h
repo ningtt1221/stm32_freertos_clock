@@ -8,7 +8,6 @@
 #include "cmsis_os2.h"
 #include "spi.h"
 #include "u8g2.h"
-#include "stdio.h"
 #include "LogicTask.h"
 
 // 假设 u8g2 对象已经在主函数中初始化完毕

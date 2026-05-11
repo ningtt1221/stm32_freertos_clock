@@ -1,5 +1,12 @@
 #include "OledTask.h"
+
+#include <stdio.h>
+#include <string.h>
+
 #include "BootAnim.h"
+#include "usart.h"
+#include "WifiTask.h"  // 【新增】引入网络任务头文件，以获取天气和室外温度
+
 // 硬件spi移植
 
 uint8_t u8x8_gpio_and_delay(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void *arg_ptr) {
@@ -82,7 +89,7 @@ void PlayBootAnimation(void)
 void StartOledTask(void *argument) {
     (void)argument;
 
-    char str_buf[16];
+    char str_buf[32];
     uint8_t display_hour = 0;
     uint8_t display_min = 0;
     uint8_t display_sec = 0;
@@ -93,6 +100,11 @@ void StartOledTask(void *argument) {
 
     // 1. 开机动画 (仅执行一次)
     PlayBootAnimation();
+
+    // 2. 【新增】：开机主动向 ESP8266 发送同步请求
+    // 这样即使 STM32 单独按了 Reset 重启，也能立刻拿到最新数据
+    char sync_cmd[] = "#SYNC\r\n";
+    HAL_UART_Transmit(&huart1, (uint8_t*)sync_cmd, strlen(sync_cmd), 100);
 
     for (;;) {
         // 1. 计算闪烁标志位: 系统每过 500ms，blink_flag 在 0 和 1 之间翻转一次
@@ -106,19 +118,35 @@ void StartOledTask(void *argument) {
 
             // ================== 时间界面 & 闹钟界面 ==================
             case PAGE_TIME:
+                // 获取底层真实 RTC 时间
+                GetRealTimeForDisplay(&display_hour, &display_min, &display_sec);
+                // --- 绘制日期数字 ---
+                u8g2_SetFont(&myDisplay, u8g2_font_ncenB12_tr);
+                sprintf(str_buf, "20%02d-%02d-%02d", sDate.Year, sDate.Month, sDate.Date);
+                u8g2_DrawStr(&myDisplay, 20, 20, str_buf);
+                // --- 绘制巨大的时间数字 ---
+                u8g2_SetFont(&myDisplay, u8g2_font_ncenB18_tr);
+                // 绘制小时
+                sprintf(str_buf, "%02d", display_hour);
+                u8g2_DrawStr(&myDisplay, 5, 55, str_buf);
+                // 绘制中间的冒号 (固定显示，或者你也可以加上秒级闪烁逻辑)
+                u8g2_DrawStr(&myDisplay, 40, 53, ":");
+                // 绘制分钟
+                sprintf(str_buf, "%02d", display_min);
+                u8g2_DrawStr(&myDisplay, 50, 55, str_buf);
+                // 绘制中间的冒号
+                u8g2_DrawStr(&myDisplay, 85, 53, ":");
+                // 绘制秒钟
+                sprintf(str_buf, "%02d", display_sec);
+                u8g2_DrawStr(&myDisplay, 95, 55, str_buf);
+                break;
             case PAGE_ALARM:
                 // --- 绘制顶部标题栏 ---
-                u8g2_SetFont(&myDisplay, u8g2_font_ncenB08_tr); // 8像素高英文字体
-                if (CurrentPage == PAGE_TIME) {
-                    u8g2_DrawStr(&myDisplay, 0, 10, "Current Time");
-                } else {
-                    u8g2_DrawStr(&myDisplay, 0, 10, "Alarm Setting");
-                }
+                u8g2_SetFont(&myDisplay, u8g2_font_ncenB12_tr);
+                u8g2_DrawStr(&myDisplay, 0, 15, "Alarm");
 
                 // --- 确定当前要绘制的数据源 ---
 
-
-                
                 if (EditState != EDIT_NONE) {
                     // 正在编辑中：显示逻辑任务中暂存的变量 (随按键实时变化)
                     display_hour = TempHour;
@@ -129,47 +157,134 @@ void StartOledTask(void *argument) {
                 }
 
                 // --- 绘制巨大的时间数字 ---
-                u8g2_SetFont(&myDisplay, u8g2_font_logisoso24_tn); // 24像素高纯数字大字体
+                u8g2_SetFont(&myDisplay, u8g2_font_ncenB18_tr); // 24像素高纯数字大字体
 
                 // 绘制小时：如果处于编辑小时状态，且闪烁标志为1，则跳过绘制(隐身)
                 if (!(EditState == EDIT_HOUR && blink_flag == 1)) {
                     sprintf(str_buf, "%02d", display_hour);
-                    u8g2_DrawStr(&myDisplay, 5, 45, str_buf);
+                    u8g2_DrawStr(&myDisplay, 5, 55, str_buf);
                 }
 
                 // 绘制中间的冒号 (固定显示，或者你也可以加上秒级闪烁逻辑)
-                u8g2_DrawStr(&myDisplay, 40, 43, ":");
+                u8g2_DrawStr(&myDisplay, 40, 53, ":");
 
                 // 绘制分钟：如果处于编辑分钟状态，且闪烁标志为1，则跳过绘制
                 if (!(EditState == EDIT_MIN && blink_flag == 1)) {
                     sprintf(str_buf, "%02d", display_min);
-                    u8g2_DrawStr(&myDisplay, 50, 45, str_buf);
+                    u8g2_DrawStr(&myDisplay, 50, 55, str_buf);
                 }
                 // 绘制中间的冒号
-                u8g2_DrawStr(&myDisplay, 85, 43, ":");
+                u8g2_DrawStr(&myDisplay, 85, 53, ":");
                 sprintf(str_buf, "%02d", display_sec);
-                u8g2_DrawStr(&myDisplay, 95, 45, str_buf);
-
+                u8g2_DrawStr(&myDisplay, 95, 55, str_buf);
                 break;
-
             // ================== 温度界面 ==================
             case PAGE_TEMP:
                 // --- 绘制顶部标题栏 ---
                 u8g2_SetFont(&myDisplay, u8g2_font_ncenB08_tr);
-                u8g2_DrawStr(&myDisplay, 0, 10, "Temperature");
+                u8g2_DrawStr(&myDisplay, 0, 10, "Temp & Weather");
 
-                // --- 绘制温度数值 ---
-                u8g2_SetFont(&myDisplay, u8g2_font_logisoso24_tr); // 这里要选带字母的字体，tn后缀仅含数字
+                // 【修改点2】：重构温度界面，上下分两行显示室内和室外
 
-                int temp_int = (int)CurrentTemp; // 提取整数部分 (例如 27)
-                int temp_frac = (int)(CurrentTemp * 10) % 10; // 提取一位小数 (例如 5)
+                // --- 1. 室内温度 (IN - 来源于 LM75) ---
+                u8g2_SetFont(&myDisplay, u8g2_font_ncenB08_tr);
+                u8g2_DrawStr(&myDisplay, 0, 35, "IN:");
 
-                // 使用 %d.%d 完美绕过浮点打印限制！
-                sprintf(str_buf, "%d.%d C", temp_int, temp_frac);
-                u8g2_DrawStr(&myDisplay, 15, 45, str_buf);
+                u8g2_SetFont(&myDisplay, u8g2_font_ncenB12_tr); // 使用 16 像素的中号字体
+                int temp_int = (int)CurrentTemp;
+                int temp_frac = (int)(CurrentTemp * 10) % 10;
+                sprintf(str_buf, "%d.%d  C", temp_int, temp_frac);
+                u8g2_DrawStr(&myDisplay, 30, 36, str_buf);
+                u8g2_DrawCircle(&myDisplay, 72, 22, 2, U8G2_DRAW_ALL); // 室内度数符号的小圆圈
 
-                // 画一个小圆圈代表度数符号 "°"
-                u8g2_DrawCircle(&myDisplay, 80, 20, 3, U8G2_DRAW_ALL);
+                // --- 2. 室外温度 (OUT) & 天气 (来源于 ESP8266) ---
+                u8g2_SetFont(&myDisplay, u8g2_font_ncenB08_tr);
+                u8g2_DrawStr(&myDisplay, 0, 60, "OUT:");
+
+                u8g2_SetFont(&myDisplay, u8g2_font_ncenB12_tr);
+                if (GlobalWeatherCode == 99) {
+                    // 如果值还是99，说明开机后还没收到 ESP8266 的数据
+                    u8g2_DrawStr(&myDisplay, 30, 62, "-- C");
+                } else {
+                    sprintf(str_buf, "%d  C", GlobalNetTemp);
+                    u8g2_DrawStr(&myDisplay, 30, 62, str_buf);
+                    u8g2_DrawCircle(&myDisplay, 55, 48, 2, U8G2_DRAW_ALL); // 室外度数符号
+
+                    // --- 3. 将天气代码转为英文单词显示在右下角 ---
+                    const char* weat_str = "N/A";
+                    if (GlobalWeatherCode <= 3) weat_str = "Sunny";          // 0~3 是各种晴天
+                    else if (GlobalWeatherCode <= 8) weat_str = "Cloudy";    // 4~8 是各种多云
+                    else if (GlobalWeatherCode == 9) weat_str = "Overcast";  // 9 是阴天
+                    else if (GlobalWeatherCode <= 19) weat_str = "Rain";     // 10~19 是各种雨天
+                    else if (GlobalWeatherCode <= 25) weat_str = "Snow";     // 20~25 是雪天
+
+                    u8g2_SetFont(&myDisplay, u8g2_font_ncenB08_tr); // 换回小字体显示天气文本
+                    u8g2_DrawStr(&myDisplay, 75, 60, weat_str);
+                }
+                break;
+            // ================== 天气预报界面 ==================
+            case PAGE_FORECAST:
+                // 1. 绘制顶部标题栏
+                u8g2_SetFont(&myDisplay, u8g2_font_ncenB08_tr);
+
+                // 根据逻辑任务传来的翻页索引，动态显示标题
+                if (FcstDayIndex == 0) {
+                    u8g2_DrawStr(&myDisplay, 0, 10, "Forecast: Today");
+                } else if (FcstDayIndex == 1) {
+                    u8g2_DrawStr(&myDisplay, 0, 10, "Forecast: Tomorrow");
+                } else {
+                    u8g2_DrawStr(&myDisplay, 0, 10, "Forecast: Day After");
+                }
+
+                // 2. 检查网络数据是否已到达 (99为初始无效值)
+                if (GlobalFcstCode[0] == 99) {
+                    u8g2_DrawStr(&myDisplay, 30, 40, "Waiting...");
+                } else {
+                    // 获取当前选择页面的天气预报数据
+                    uint8_t code = GlobalFcstCode[FcstDayIndex];
+                    int8_t high = GlobalFcstHigh[FcstDayIndex];
+                    int8_t low = GlobalFcstLow[FcstDayIndex];
+
+                    // 3. 将温度范围靠左对齐绘制
+                    u8g2_SetFont(&myDisplay, u8g2_font_ncenB12_tr);
+                    sprintf(str_buf, "%d ~ %d  C", low, high);
+                    u8g2_DrawStr(&myDisplay, 0, 38, str_buf);
+                    u8g2_DrawCircle(&myDisplay, 65, 22, 2, U8G2_DRAW_ALL); // 度数符号的小圆圈
+
+                    // 4. 将天气代码转换为文字，并匹配对应的【内置图标代码】
+                    const char* f_weat = "N/A";
+                    uint16_t icon_code = 0x0040; // 默认图标：云朵
+
+                    if (code <= 3) {
+                        f_weat = "Sunny";
+                        icon_code = 0x0045; // u8g2图标：大太阳
+                    } else if (code <= 8) {
+                        f_weat = "Cloudy";
+                        icon_code = 0x0041; // u8g2图标：多云 (云朵加太阳)
+                    } else if (code == 9) {
+                        f_weat = "Overcast";
+                        icon_code = 0x0040; // u8g2图标：纯云朵
+                    } else if (code <= 19) {
+                        f_weat = "Rain";
+                        icon_code = 0x0043; // u8g2图标：下雨
+                    } else if (code <= 25) {
+                        f_weat = "Snow";
+                        icon_code = 0x0040; // u8g2图标：雪天没有独立图标，暂用云朵代替
+                    }
+
+                    // 5. 绘制天气状况英文字符串
+                    u8g2_SetFont(&myDisplay, u8g2_font_ncenB12_tr);
+                    u8g2_DrawStr(&myDisplay, 0, 60, f_weat);
+
+                    // ==========================================================
+                    // 6. 在屏幕右侧绘制 32x32 像素的巨大天气图标！
+                    // ==========================================================
+                    u8g2_SetFont(&myDisplay, u8g2_font_open_iconic_weather_4x_t);
+                    // DrawGlyph函数专门用于绘制特殊字符/图标
+                    // X=85(靠右), Y=55(底部基线)，刚好在屏幕右侧居中
+                    u8g2_DrawGlyph(&myDisplay, 90, 55, icon_code);
+
+                }
                 break;
         }
 

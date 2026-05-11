@@ -5,10 +5,12 @@
 /* LogicTask.c */
 #include "LogicTask.h"
 
+
 Page_t CurrentPage = PAGE_TIME;
 EditState_t EditState = EDIT_NONE;
 uint8_t TempHour = 0;
 uint8_t TempMin = 0;
+uint8_t FcstDayIndex = 0;
 
 RTC_TimeTypeDef sTime = {0};
 RTC_DateTypeDef sDate = {0};
@@ -72,24 +74,21 @@ void  StartLogicTask(void *argument) {
                 // 页面循环切换: TIME -> ALARM -> TEMP -> TIME
                 if (CurrentPage == PAGE_TIME) CurrentPage = PAGE_ALARM;
                 else if (CurrentPage == PAGE_ALARM) CurrentPage = PAGE_TEMP;
-                else if (CurrentPage == PAGE_TEMP) CurrentPage = PAGE_TIME;
+                else if (CurrentPage == PAGE_TEMP) CurrentPage = PAGE_FORECAST;  // 从温度切到预报
+                else if (CurrentPage == PAGE_FORECAST) CurrentPage = PAGE_TIME;  // 从预报切回主页面
 
                 continue; // 处理完毕，跳过后续逻辑
             }
 
             // ================== KEY1: 修改/确认逻辑 ==================
             if (msg.key_index == 1 && msg.event == BTN_EVENT_CLICK) {
-                // 只有在时间或闹钟页面才允许修改
-                if (CurrentPage == PAGE_TIME || CurrentPage == PAGE_ALARM) {
+                // 只有在闹钟页面才允许修改
+                if (CurrentPage == PAGE_ALARM) {
 
                     if (EditState == EDIT_NONE) {
                         // 第一次按：加载当前时间/闹钟，开始修改小时
                         EditState = EDIT_HOUR;
-                        if (CurrentPage == PAGE_TIME) {
-                            Get_RTC_Time();
-                        } else {
-                            Get_RTC_Alarm();
-                        }
+                        Get_RTC_Alarm();
                     }
                     else if (EditState == EDIT_HOUR) {
                         // 第二次按：切换到修改分钟
@@ -98,34 +97,43 @@ void  StartLogicTask(void *argument) {
                     else if (EditState == EDIT_MIN) {
                         // 第三次按：确认保存，停止修改
                         EditState = EDIT_NONE;
-                        if (CurrentPage == PAGE_TIME) {
-                            Save_RTC_Time();
-                        } else {
-                            Save_RTC_Alarm();
-                        }
+                        Save_RTC_Alarm();
                     }
                 }
             }
 
-            // ================== KEY2 (加) & KEY3 (减) ==================
-            // 无论是单击(CLICK)还是长按(LONG_PRESS)，只要处于编辑状态，都执行加减
-            if ((msg.key_index == 2 || msg.key_index == 3) && EditState != EDIT_NONE) {
+            // ================== KEY2 (加/下一天) & KEY3 (减/上一天) ==================
+            if (msg.key_index == 2 || msg.key_index == 3) {
 
                 int8_t step = (msg.key_index == 2) ? 1 : -1;
 
-                if (EditState == EDIT_HOUR) {
-                    // 小时 0-23 循环
-                    int16_t new_hour = TempHour + step;
-                    if (new_hour > 23) new_hour = 0;
-                    if (new_hour < 0)  new_hour = 23;
-                    TempHour = (uint8_t)new_hour;
+                // 场景 1: 如果处于编辑状态 (修改时间/闹钟) - 响应单击和长按
+                if (EditState != EDIT_NONE) {
+                    if (EditState == EDIT_HOUR) {
+                        // 小时 0-23 循环
+                        int16_t new_hour = TempHour + step;
+                        if (new_hour > 23) new_hour = 0;
+                        if (new_hour < 0)  new_hour = 23;
+                        TempHour = (uint8_t)new_hour;
+                    }
+                    else if (EditState == EDIT_MIN) {
+                        // 分钟 0-59 循环
+                        int16_t new_min = TempMin + step;
+                        if (new_min > 59) new_min = 0;
+                        if (new_min < 0)  new_min = 59;
+                        TempMin = (uint8_t)new_min;
+                    }
                 }
-                else if (EditState == EDIT_MIN) {
-                    // 分钟 0-59 循环
-                    int16_t new_min = TempMin + step;
-                    if (new_min > 59) new_min = 0;
-                    if (new_min < 0)  new_min = 59;
-                    TempMin = (uint8_t)new_min;
+                // 场景 2: 如果在天气预报页面 - 仅响应单击进行翻页
+                else if (CurrentPage == PAGE_FORECAST && msg.event == BTN_EVENT_CLICK) {
+                    if (step == 1) {
+                        // KEY2 向后翻页: 0->1, 1->2, 2->0
+                        FcstDayIndex = (FcstDayIndex + 1) % 3;
+                    } else {
+                        // KEY3 向前翻页: 0->2, 2->1, 1->0
+                        // 技巧: 对于模3运算，加2等同于减1，能完美避免无符号数变为负数引发的Bug
+                        FcstDayIndex = (FcstDayIndex + 2) % 3;
+                    }
                 }
             }
         }

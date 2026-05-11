@@ -15,7 +15,8 @@
 typedef enum {
     PAGE_TIME = 0,  // 时间界面
     PAGE_ALARM,     // 闹钟界面
-    PAGE_TEMP       // 温度界面
+    PAGE_TEMP,      // 温度界面
+    PAGE_FORECAST   // 天气预报界面
 } Page_t;
 
 /* 2. 编辑状态枚举 */
@@ -39,6 +40,7 @@ extern RTC_DateTypeDef sDate;
 extern RTC_AlarmTypeDef sAlarm;
 extern uint8_t TempHour;  // 正在修改中的小时
 extern uint8_t TempMin;   // 正在修改中的分钟
+extern uint8_t FcstDayIndex; // 【新增】引入逻辑任务中的日期索引，供天气预报界面使用
 
 extern osMessageQueueId_t KeyQueueHandle;
 

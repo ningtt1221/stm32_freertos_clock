@@ -44,6 +44,8 @@ add_executable(${CMAKE_PROJECT_NAME}
         Core/APP/Tasks/ButtonTask.c
         Core/APP/Tasks/LogicTask.c
         Core/APP/Tasks/TempTask.c
+        Core/APP/Tasks/WifiTask.c
+        Core/APP/Tasks/WifiTask.c
 )
 
 # Add STM32CubeMX generated sources

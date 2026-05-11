@@ -26,6 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "LogicTask.h"
+#include "usart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -82,6 +83,13 @@ const osThreadAttr_t LogicTask_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityAboveNormal,
 };
+/* Definitions for WifiTask */
+osThreadId_t WifiTaskHandle;
+const osThreadAttr_t WifiTask_attributes = {
+  .name = "WifiTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* Definitions for KeyQueue */
 osMessageQueueId_t KeyQueueHandle;
 const osMessageQueueAttr_t KeyQueue_attributes = {
@@ -103,6 +111,7 @@ extern void StartOledTask(void *argument);
 extern void StartButtonTask(void *argument);
 extern void StartTempTask(void *argument);
 extern void StartLogicTask(void *argument);
+extern void StartWifiTask(void *argument);
 void BuzzerTimerCallback(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -156,6 +165,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of LogicTask */
   LogicTaskHandle = osThreadNew(StartLogicTask, NULL, &LogicTask_attributes);
+
+  /* creation of WifiTask */
+  WifiTaskHandle = osThreadNew(StartWifiTask, NULL, &WifiTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
